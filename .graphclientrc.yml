@@ -1,0 +1,7 @@
+# .graphclientrc.yml
+sources:
+  - name: usual-demo
+    handler:
+      graphql:
+        endpoint: https://api.studio.thegraph.com/query/115874/usual-demo/version/latest
+documents: ["./graphql/*.{gql,graphql}"]
