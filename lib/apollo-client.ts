@@ -1,8 +1,10 @@
 import { API_CONFIG, POOL_ID } from "./config";
 
 // Simple fetch-based GraphQL client - no complex dependencies!
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 export async function graphqlFetch<T = any>(
   query: string,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   variables?: any,
   endpoint: string = API_CONFIG.endpoint
 ): Promise<T> {
@@ -55,8 +57,8 @@ export const queries = {
   `,
 
   getPoolSnapshots: `
-    query GetPoolSnapshots($first: Int!, $skip: Int!) {
-    poolSnapshots(first: $first, skip: $skip, orderBy: timestamp, orderDirection: desc) {
+    query GetPoolSnapshots($first: Int!, $timestampLt: Int) {
+    poolSnapshots(first: $first, orderBy: timestamp, orderDirection: desc, where: { timestamp_lt: $timestampLt }) {
       timestamp
       usd0Balance
       usd0PlusBalance
@@ -78,14 +80,14 @@ export const queries = {
   `,
 
   getUserPosition: `
-    query GetUserPosition($userId: String!) {
+    query GetUserPosition($userId: String!, $first: Int!, $timestampLt: Int) {
     user(id: $userId) {
       id
       lpTokenBalance
       shareOfPool
       lastActivity
       txCount
-      userSnapshots(first: $first, skip: $skip, orderBy: timestamp, orderDirection: desc) {
+      userSnapshots(first: $first, orderBy: timestamp, orderDirection: desc, where: { timestamp_lt: $timestampLt }) {
         timestamp
         lpTokenBalance
         shareOfPool

@@ -24,7 +24,6 @@ interface TopLPsTableProps {
     lastActivity: number;
     txCount: number;
   }>;
-  totalSupply: string;
   isLoading?: boolean;
   error?: string | null;
 }
@@ -135,12 +134,7 @@ function AddressCell({ address }: { address: string }) {
   );
 }
 
-export function TopLPsTable({
-  data,
-  totalSupply,
-  isLoading,
-  error,
-}: TopLPsTableProps) {
+export function TopLPsTable({ data, isLoading, error }: TopLPsTableProps) {
   if (isLoading) {
     return (
       <Card className="bg-gradient-to-br from-gray-900 to-gray-800 border-gray-700">

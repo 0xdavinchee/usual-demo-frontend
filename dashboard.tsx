@@ -1,66 +1,19 @@
 "use client";
 import { graphqlFetch, queries } from "./lib/apollo-client";
 import { formatEther } from "viem";
-import { GRAPHQL_ENDPOINT } from "./lib/config";
+import { GRAPHQL_ENDPOINT, TWO_WEEKS } from "./lib/config";
 
 import { useEffect, useState } from "react";
 import { MetricCard } from "./components/metric-card";
 import { TVLChart } from "./components/tvl-chart";
 import { TopLPsTable } from "./components/top-lps-table";
 import { UserPositionPanel } from "./components/user-position-panel";
-import { formatDate, formatNumberWithCommas, sampleDataEveryDay } from "./lib/utils";
-
-// Mock data - replace with actual GraphQL queries
-const mockPoolData = {
-  usd0Balance: "2500000",
-  usd0PlusBalance: "2300000",
-  totalSupply: "4750000",
-  totalSwapVolume: "15600000",
-  totalLiquidityAdded: "8900000",
-  totalLiquidityRemoved: "4150000",
-  tvl: "4800000",
-};
-
-const mockTVLData = Array.from({ length: 30 }, (_, i) => ({
-  timestamp: Date.now() - (29 - i) * 24 * 60 * 60 * 1000,
-  tvl: 4800000 + Math.random() * 500000 - 250000,
-  date: new Date(
-    Date.now() - (29 - i) * 24 * 60 * 60 * 1000
-  ).toLocaleDateString('en-US', {
-    timeZone: 'UTC',
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-  }),
-}));
-
-const mockTopLPs = [
-  {
-    userAddress: "0x742d35Cc6634C0532925a3b8D4C9db96C4b4d8b9",
-    lpTokenBalance: "125000",
-    lastActivity: 1704067200,
-  },
-  {
-    userAddress: "0x8ba1f109551bD432803012645Hac136c22C501e",
-    lpTokenBalance: "98500",
-    lastActivity: 1703980800,
-  },
-  {
-    userAddress: "0x1f9840a85d5aF5bf1D1762F925BDADdC4201F984",
-    lpTokenBalance: "87200",
-    lastActivity: 1703894400,
-  },
-  {
-    userAddress: "0xA0b86a33E6441E6C7D3b4c6C8b8b8b8b8b8b8b8b",
-    lpTokenBalance: "76800",
-    lastActivity: 1703808000,
-  },
-  {
-    userAddress: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
-    lpTokenBalance: "65400",
-    lastActivity: 1703721600,
-  },
-];
+import {
+  formatDate,
+  formatNumberWithCommas,
+  sampleDataEveryDay,
+  sampleDataWindowByDay,
+} from "./lib/utils";
 
 export default function DeFiDashboard() {
   const [userPosition, setUserPosition] = useState<any>(null);
@@ -85,15 +38,13 @@ export default function DeFiDashboard() {
           {},
           GRAPHQL_ENDPOINT
         );
-        console.log("Pool overview:", data);
         setPoolData(data);
       } catch (error) {
         console.error("Error fetching pool overview:", error);
         setPoolError(
           error instanceof Error ? error.message : "Failed to fetch pool data"
         );
-        // Fallback to mock data if API fails
-        setPoolData({ pool: mockPoolData });
+        setPoolData({ pool: {} });
       } finally {
         setIsLoadingPool(false);
       }
@@ -111,15 +62,15 @@ export default function DeFiDashboard() {
           {},
           GRAPHQL_ENDPOINT
         );
-        console.log("Top LPs:", data);
         setTopLPs(data?.users || []);
       } catch (error) {
         console.error("Error fetching top LPs:", error);
         setTopLPsError(
-          error instanceof Error ? error.message : "Failed to fetch top LPs data"
+          error instanceof Error
+            ? error.message
+            : "Failed to fetch top LPs data"
         );
-        // Fallback to mock data if API fails
-        setTopLPs(mockTopLPs);
+        setTopLPs([]);
       } finally {
         setIsLoadingTopLPs(false);
       }
@@ -132,74 +83,79 @@ export default function DeFiDashboard() {
       try {
         setIsLoadingTvl(true);
         setTvlError(null);
-        
+
         // Fetch data in batches until we have enough history
         let allSnapshots: any[] = [];
         let hasEnoughHistory = false;
         let batchSize = 1000;
-        let skip = 0;
         let totalFetched = 0;
-        
-        while (!hasEnoughHistory && totalFetched < 100000) { // Limit to prevent infinite loops
+        let timestampLt: number | undefined = Math.floor(Date.now() / 1000);
+
+        while (!hasEnoughHistory && totalFetched < 100000) {
+          const variables: any = { first: batchSize };
+          if (timestampLt !== undefined) variables.timestampLt = timestampLt;
           const data = await graphqlFetch(
             queries.getPoolSnapshots,
-            { first: batchSize, skip: skip },
+            variables,
             GRAPHQL_ENDPOINT
           );
-          
+
           const newSnapshots = data?.poolSnapshots || [];
           allSnapshots = [...allSnapshots, ...newSnapshots];
           totalFetched += newSnapshots.length;
-          skip += batchSize; // Increment skip for next batch
-          
-          // Check if we have enough historical data (at least 2 weeks)
-          const twoWeeksAgo = Math.floor(Date.now() / 1000) - (14 * 24 * 60 * 60);
-          hasEnoughHistory = allSnapshots.some((snapshot: any) => snapshot.timestamp <= twoWeeksAgo);
-          
-          console.log(`Fetched batch of ${newSnapshots.length} snapshots (skip: ${skip - batchSize}, total: ${totalFetched})`);
-          
-          // If we got fewer snapshots than requested, we've reached the end
+
+          if (newSnapshots.length > 0) {
+            timestampLt = Math.min(
+              ...newSnapshots.map((s: any) => s.timestamp)
+            );
+          }
+
+          if (allSnapshots.length > 0) {
+            const latestTimestamp = Math.max(
+              ...allSnapshots.map((s: any) => s.timestamp)
+            );
+            const twoWeeksAgo = latestTimestamp - TWO_WEEKS;
+            hasEnoughHistory = allSnapshots.some(
+              (snapshot: any) => snapshot.timestamp <= twoWeeksAgo
+            );
+          } else {
+            hasEnoughHistory = false;
+          }
+
           if (newSnapshots.length < batchSize) {
-            console.log('Reached end of available data');
             break;
           }
         }
-        
-        console.log(`Total snapshots fetched: ${allSnapshots.length}`);
-        
+
         // Transform the data for the chart
         const transformedSnapshots = allSnapshots.map((snapshot: any) => ({
           timestamp: snapshot.timestamp,
-          tvl: 
-          Number(formatEther(BigInt(snapshot.usd0Balance || 0))) + 
-               Number(formatEther(BigInt(snapshot.usd0PlusBalance || 0))),
+          tvl:
+            Number(formatEther(BigInt(snapshot.usd0Balance || 0))) +
+            Number(formatEther(BigInt(snapshot.usd0PlusBalance || 0))),
           date: formatDate(snapshot.timestamp),
         }));
-        
+
         // Check if we have enough historical data (at least 30 days)
-        const twoWeeksAgo = Math.floor(Date.now() / 1000) - (14 * 24 * 60 * 60);
-        const hasEnoughHistoryFinal = transformedSnapshots.some((snapshot: any) => snapshot.timestamp <= twoWeeksAgo);
-        
-        console.log(`Earliest timestamp: ${transformedSnapshots.length > 0 ? new Date(transformedSnapshots[0].timestamp * 1000).toISOString() : 'No data'}`);
-        console.log(`30 days ago: ${new Date(twoWeeksAgo * 1000).toISOString()}`);
-        console.log(`Has enough history: ${hasEnoughHistoryFinal}`);
-        
+        const twoWeeksAgo = Math.floor(Date.now() / 1000) - TWO_WEEKS;
+        const hasEnoughHistoryFinal = transformedSnapshots.some(
+          (snapshot: any) => snapshot.timestamp <= twoWeeksAgo
+        );
+
         // Sample data to get one point every day
         const sampledData = sampleDataEveryDay(transformedSnapshots);
-        
+
         // If we don't have enough data points, use all available data
-        const finalData = sampledData.length > 0 ? sampledData : transformedSnapshots;
-        
-        console.log(`Sampled to ${finalData.length} points`);
+        const finalData =
+          sampledData.length > 0 ? sampledData : transformedSnapshots;
+
         setTvlData(finalData);
-        console.log(finalData);
       } catch (error) {
         console.error("Error fetching TVL data:", error);
         setTvlError(
           error instanceof Error ? error.message : "Failed to fetch TVL data"
         );
-        // Fallback to mock data if API fails
-        setTvlData(mockTVLData);
+        setTvlData([]);
       } finally {
         setIsLoadingTvl(false);
       }
@@ -213,78 +169,74 @@ export default function DeFiDashboard() {
       // First, get the user's current data
       const userData = await graphqlFetch(
         queries.getUserPosition,
-        { userId: address, first: 1, skip: 0 },
+        {
+          userId: address,
+          first: 1,
+          skip: 0,
+          timestampLt: Math.floor(Date.now() / 1000),
+        },
         GRAPHQL_ENDPOINT
       );
-      
+
       // Fetch user snapshots in batches until we have enough history
       let allUserSnapshots: any[] = [];
       let hasEnoughHistory = false;
       let batchSize = 1000;
-      let skip = 0;
       let totalFetched = 0;
-      
-      while (!hasEnoughHistory && totalFetched < 100000) { // Limit to prevent infinite loops
+      let timestampLt: number | undefined = Math.floor(Date.now() / 1000);
+
+      while (!hasEnoughHistory && totalFetched < 100000) {
+        const variables: any = { userId: address, first: batchSize };
+        if (timestampLt !== undefined) variables.timestampLt = timestampLt;
         const snapshotData = await graphqlFetch(
           queries.getUserPosition,
-          { userId: address, first: batchSize, skip: skip },
+          variables,
           GRAPHQL_ENDPOINT
         );
-        
+
         const newSnapshots = snapshotData?.user?.userSnapshots || [];
         allUserSnapshots = [...allUserSnapshots, ...newSnapshots];
         totalFetched += newSnapshots.length;
-        skip += batchSize; // Increment skip for next batch
-        
-        // Check if we have enough historical data (at least 2 weeks)
-        const twoWeeksAgo = Math.floor(Date.now() / 1000) - (14 * 24 * 60 * 60);
-        hasEnoughHistory = allUserSnapshots.some((snapshot: any) => snapshot.timestamp <= twoWeeksAgo);
-        
-        console.log(`Fetched batch of ${newSnapshots.length} user snapshots (skip: ${skip - batchSize}, total: ${totalFetched})`);
-        
-        // If we got fewer snapshots than requested, we've reached the end
+
+        if (newSnapshots.length > 0) {
+          timestampLt = Math.min(...newSnapshots.map((s: any) => s.timestamp));
+        }
+
+        if (allUserSnapshots.length > 0) {
+          const latestTimestamp = Math.max(
+            ...allUserSnapshots.map((s: any) => s.timestamp)
+          );
+          const twoWeeksAgo = latestTimestamp - TWO_WEEKS;
+          hasEnoughHistory = allUserSnapshots.some(
+            (snapshot: any) => snapshot.timestamp <= twoWeeksAgo
+          );
+        } else {
+          hasEnoughHistory = false;
+        }
+
         if (newSnapshots.length < batchSize) {
-          console.log('Reached end of available user data');
           break;
         }
       }
-      
-      console.log(`Total user snapshots fetched: ${allUserSnapshots.length}`);
 
       // Transform the data to match your expected format
+      const rawHistory = allUserSnapshots.map((snapshot: any) => ({
+        timestamp: snapshot.timestamp,
+        balance: Number(formatEther(BigInt(snapshot.lpTokenBalance || 0))),
+        date: formatDate(snapshot.timestamp),
+      }));
+      const balanceHistory = sampleDataWindowByDay(rawHistory);
       const userPosition = {
         userAddress: address,
         lpTokenBalance: userData?.user?.lpTokenBalance || "0",
         lastActivity: userData?.user?.lastActivity || 0,
-        balanceHistory: allUserSnapshots.map((snapshot: any) => ({
-          timestamp: snapshot.timestamp,
-          balance: Number(formatEther(BigInt(snapshot.lpTokenBalance || 0))),
-          date: formatDate(snapshot.timestamp),
-        })),
+        balanceHistory,
       };
 
       setUserPosition(userPosition);
     } catch (error) {
       console.error("Error fetching user position:", error);
-      // Fallback to mock data for now
-      const mockUserPosition = {
-        userAddress: address,
-        lpTokenBalance: "45000",
-        lastActivity: 1704067200,
-        balanceHistory: Array.from({ length: 15 }, (_, i) => ({
-          timestamp: Date.now() - (14 - i) * 24 * 60 * 60 * 1000,
-          balance: 45000 + Math.random() * 10000 - 5000,
-          date: new Date(
-            Date.now() - (14 - i) * 24 * 60 * 60 * 1000
-          ).toLocaleDateString('en-US', {
-            timeZone: 'UTC',
-            year: 'numeric',
-            month: 'short',
-            day: 'numeric',
-          }),
-        })),
-      };
-      setUserPosition(mockUserPosition);
+      setUserPosition({});
     } finally {
       setIsLoadingUser(false);
     }
@@ -319,11 +271,13 @@ export default function DeFiDashboard() {
 
         {/* Pool Overview Cards */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                    <MetricCard 
-            title="USD0 BALANCE IN POOL" 
+          <MetricCard
+            title="USD0 BALANCE IN POOL"
             value={
               poolData?.pool?.usd0Balance
-                ? `$${formatNumberWithCommas(Number(formatEther(poolData.pool.usd0Balance)))}`
+                ? `$${formatNumberWithCommas(
+                    Number(formatEther(poolData.pool.usd0Balance))
+                  )}`
                 : "$0.00"
             }
           />
@@ -331,15 +285,19 @@ export default function DeFiDashboard() {
             title="USD0++ BALANCE IN POOL"
             value={
               poolData?.pool?.usd0PlusBalance
-                ? `$${formatNumberWithCommas(Number(formatEther(poolData.pool.usd0PlusBalance)))}`
+                ? `$${formatNumberWithCommas(
+                    Number(formatEther(poolData.pool.usd0PlusBalance))
+                  )}`
                 : "$0.00"
             }
           />
-          <MetricCard 
-            title="TOTAL LP TOKEN SUPPLY" 
+          <MetricCard
+            title="TOTAL LP TOKEN SUPPLY"
             value={
               poolData?.pool?.totalSupply
-                ? formatNumberWithCommas(Number(formatEther(poolData.pool.totalSupply)))
+                ? formatNumberWithCommas(
+                    Number(formatEther(poolData.pool.totalSupply))
+                  )
                 : "0.00"
             }
           />
@@ -347,7 +305,9 @@ export default function DeFiDashboard() {
             title="TOTAL LIFETIME SWAP VOLUME"
             value={
               poolData?.pool?.volume
-                ? `$${formatNumberWithCommas(Number(formatEther(poolData.pool.volume)))}`
+                ? `$${formatNumberWithCommas(
+                    Number(formatEther(poolData.pool.volume))
+                  )}`
                 : "$0.00"
             }
           />
@@ -358,7 +318,7 @@ export default function DeFiDashboard() {
               poolData?.pool?.usd0PlusLiquidityAdded
                 ? `$${formatNumberWithCommas(
                     Number(formatEther(poolData.pool.usd0LiquidityAdded)) +
-                    Number(formatEther(poolData.pool.usd0PlusLiquidityAdded))
+                      Number(formatEther(poolData.pool.usd0PlusLiquidityAdded))
                   )}`
                 : "$0.00"
             }
@@ -370,7 +330,9 @@ export default function DeFiDashboard() {
               poolData?.pool?.usd0PlusLiquidityRemoved
                 ? `$${formatNumberWithCommas(
                     Number(formatEther(poolData.pool.usd0LiquidityRemoved)) +
-                    Number(formatEther(poolData.pool.usd0PlusLiquidityRemoved))
+                      Number(
+                        formatEther(poolData.pool.usd0PlusLiquidityRemoved)
+                      )
                   )}`
                 : "$0.00"
             }
@@ -379,14 +341,9 @@ export default function DeFiDashboard() {
 
         {/* Charts and Tables */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <TVLChart 
-            data={tvlData} 
-            isLoading={isLoadingTvl}
-            error={tvlError}
-          />
+          <TVLChart data={tvlData} isLoading={isLoadingTvl} error={tvlError} />
           <TopLPsTable
             data={topLPs}
-            totalSupply={poolData?.pool?.totalSupply || "0"}
             isLoading={isLoadingTopLPs}
             error={topLPsError}
           />

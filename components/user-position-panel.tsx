@@ -107,7 +107,6 @@ export function UserPositionPanel({ totalSupply, onSearchUser, userPosition, isL
                       return value.toLocaleString('en-US', { maximumFractionDigits: 0 });
                     }
                   };
-                  console.log('UserPositionPanel balanceHistory:', sortedData);
                   return (
                     <ChartContainer
                       config={{

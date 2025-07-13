@@ -13,3 +13,5 @@ export const API_CONFIG = {
     Authorization: `Bearer 358d40d80344753daa83b8d31983d8bc`,
   },
 } as const; 
+
+export const TWO_WEEKS = 14 * 24 * 60 * 60;
